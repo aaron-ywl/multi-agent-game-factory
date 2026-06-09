@@ -1,0 +1,46 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ============ 虚拟环境 ============
+venv/
+.venv/
+env/
+.env
+*.env
+!.env.example
+
+# ============ IDE ============
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ============ 运行时数据 ============
+milvus_data/
+.chroma_data/
+*.db
+*.sqlite3
+data/sessions.db
+outputs/main.py
+outputs/test_main.py
+outputs/__pycache__/
+outputs/.pytest_cache/
+.pytest_cache/
+
+# ============ 日志 ============
+*.log
+
+# ============ 大文件 ============
+*.zip
+*.tar.gz
+*.gguf
+
+# 知识库 PDF（可公开，保留）
+# data/knowledge_pdfs/*.pdf

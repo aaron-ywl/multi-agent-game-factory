@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Multi-Agent Game Factory</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0e14;--surface:#141b22;--card:#1a2332;--border:#253040;--text:#c8d6e5;--text-dim:#6e7d91;
+  --accent:#5c6ef5;--accent-glow:rgba(92,110,245,0.3);--green:#2ecc71;--red:#e74c3c;--orange:#f39c12;
+  --purple:#9b59b6;--font:'Inter','PingFang SC',-apple-system,sans-serif;--mono:'JetBrains Mono',monospace;
+  --radius:10px;--radius-sm:6px;--shadow:0 4px 24px rgba(0,0,0,0.4)}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh}
+body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 0%,rgba(92,110,245,0.08) 0%,transparent 60%),radial-gradient(ellipse at 80% 100%,rgba(155,89,182,0.06) 0%,transparent 60%);pointer-events:none;z-index:0}
+header{position:sticky;top:0;z-index:100;background:rgba(10,14,20,0.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:14px 32px;display:flex;align-items:center;gap:14px}
+header .logo{font-size:22px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header .badge{font-size:11px;padding:3px 10px;border-radius:20px;background:rgba(92,110,245,0.15);color:var(--accent);border:1px solid rgba(92,110,245,0.25)}
+.spacer{flex:1}
+header .status{font-size:13px;color:var(--text-dim);display:flex;align-items:center;gap:6px}
+header .status .dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+main{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:40px 32px}
+.hero{text-align:center;margin-bottom:40px}
+.hero h1{font-size:36px;font-weight:900;background:linear-gradient(135deg,#fff 0%,#a0b4d0 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+.hero .sub{font-size:15px;color:var(--text-dim);margin-bottom:4px}
+.hero .sub strong{color:var(--green)}
+.input-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:36px;box-shadow:var(--shadow)}
+.input-card .prompts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.prompt-btn{font-size:12px;padding:6px 14px;border-radius:20px;cursor:pointer;background:rgba(92,110,245,0.08);border:1px solid var(--border);color:var(--text-dim);transition:all 0.2s;font-family:var(--font)}
+.prompt-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(92,110,245,0.12)}
+.input-row{display:flex;gap:12px}
+.input-row textarea{flex:1;min-height:85px;resize:vertical;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:15px;font-family:var(--font);padding:14px 18px;outline:0;transition:border 0.2s}
+.input-row textarea:focus{border-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 28px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.25s;font-family:var(--font)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#7b68ee);color:#fff;box-shadow:0 4px 18px var(--accent-glow)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 24px var(--accent-glow)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.pipeline{display:flex;align-items:center;gap:0;justify-content:center;margin-bottom:36px;flex-wrap:wrap}
+.pipe-node{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px}
+.pipe-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;transition:all 0.4s;background:var(--surface);border:2px solid var(--border);color:var(--text-dim);position:relative;z-index:1}
+.pipe-icon.active{border-color:var(--accent);box-shadow:0 0 20px var(--accent-glow);animation:pulse 1.5s infinite}
+.pipe-icon.done{border-color:var(--green);background:rgba(46,204,113,0.1);color:var(--green)}
+.pipe-icon.error{border-color:var(--red);background:rgba(231,76,60,0.1);color:var(--red)}
+.pipe-icon.skip{border-color:var(--text-dim);opacity:.5}
+@keyframes pulse{0%,100%{box-shadow:0 0 10px var(--accent-glow)}50%{box-shadow:0 0 28px var(--accent-glow)}}
+.pipe-node .label{font-size:10px;color:var(--text-dim);text-align:center;max-width:70px}
+.pipe-node .label.active{color:var(--accent)}
+.pipe-node .label.done{color:var(--green)}
+.pipe-arrow{font-size:16px;color:var(--border);margin-bottom:22px}
+.pipe-arrow.done{color:var(--green)}
+.results{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px}
+.result-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:22px;transition:all 0.3s;box-shadow:var(--shadow)}
+.result-card:hover{border-color:var(--accent)}
+.card-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.card-icon{font-size:24px}
+.card-title{font-size:15px;font-weight:700;flex:1}
+.card-badge{font-size:10px;padding:2px 10px;border-radius:10px;background:rgba(46,204,113,0.15);color:var(--green)}
+.card-content{font-size:13px;color:var(--text-dim)}
+.card-content p{margin-bottom:7px}
+.card-content strong{color:var(--text)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tag{font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(92,110,245,0.1);color:var(--accent);border:1px solid rgba(92,110,245,0.2)}
+.code-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin:10px 0;overflow-x:auto;max-height:350px;overflow-y:auto}
+.code-block pre{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--text);white-space:pre-wrap}
+.code-block .ln{color:var(--text-dim);user-select:none;margin-right:10px}
+.palette{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+.swatch{width:40px;height:40px;border-radius:var(--radius-sm);border:1px solid var(--border);position:relative;transition:transform 0.2s}
+.swatch:hover{transform:scale(1.15)}
+.swatch .hex{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text-dim);font-family:var(--mono)}
+.review-stats{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+.stat{display:flex;flex-direction:column;align-items:center}
+.stat .num{font-size:26px;font-weight:800}
+.stat .num.r{color:var(--red)}.stat .num.o{color:var(--orange)}.stat .num.g{color:var(--green)}
+.stat .lbl{font-size:10px;color:var(--text-dim)}
+.issue-item{padding:7px 10px;margin:5px 0;border-radius:var(--radius-sm);background:var(--surface);border-left:3px solid var(--border)}
+.run-info{padding:8px 14px;margin:8px 0;border-radius:var(--radius-sm);font-family:var(--mono);font-size:12px;background:var(--surface)}
+.run-info.pass{border:1px solid rgba(46,204,113,0.3);color:var(--green)}
+.run-info.fail{border:1px solid rgba(231,76,60,0.3);color:var(--red)}
+.img-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:10px 0}
+.img-card{border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;background:var(--surface)}
+.img-card img{width:100%;display:block;object-fit:cover;max-height:250px}
+.img-card .img-label{padding:6px 10px;font-size:11px;text-align:center;color:var(--text-dim)}
+.img-card .img-type{font-size:10px;color:var(--accent)}
+.loading-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;color:var(--text-dim);gap:10px}
+.spinner{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 28px;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,0.6);animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}}
+@media(max-width:768px){.pipe-icon{width:36px;height:36px;font-size:15px}.pipe-arrow{font-size:12px}.results{grid-template-columns:1fr}.input-row{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">♟ Game Factory</span>
+  <span class="badge">6-Agent v2.0</span>
+  <span class="spacer"></span>
+  <span class="status"><span class="dot"></span> API Ready</span>
+</header>
+
+<main>
+<div class="hero">
+  <h1>Multi-Agent Game Factory</h1>
+  <p class="sub"><strong>From idea to playable game — 6 AI agents collaborate to design, code, review, test, and generate art</strong></p>
+  <p style="font-size:13px;color:var(--text-dim)">Real artifacts in <code style="background:var(--surface);padding:2px 6px;border-radius:4px">outputs/</code> after each run:
+    runnable <code>main.py</code> + <code>test_main.py</code> + 2D assets from Qwen-Image-2.0</p></div>
+
+<div class="input-card">
+  <div class="prompts">
+    <button class="prompt-btn" onclick="setPrompt('开发一个二次元卡牌RPG，抽卡+回合制战斗，PVE和PVP，核心特色是元素克制和角色羁绊')">🎴 卡牌RPG（默认）</button>
+    <button class="prompt-btn" onclick="setPrompt('开发一个仙侠开放世界RPG，御剑飞行+宗门修炼+多人副本')">⚔️ 仙侠RPG</button>
+    <button class="prompt-btn" onclick="setPrompt('开发一个暗黑风地牢探险Roguelike，随机地图+永久死亡+武器合成')">🏰 Roguelike</button>
+    <button class="prompt-btn" onclick="setPrompt('开发一个赛博朋克横版动作游戏，连招系统+义体改造+时间减缓')">🤖 赛博动作</button>
+  </div>
+  <div class="input-row">
+    <textarea id="inputReq" rows="3">开发一个二次元卡牌RPG游戏，抽卡+回合制战斗，PVE和PVP，核心特色是元素克制和角色羁绊系统</textarea>
+    <button class="btn btn-primary" id="runBtn" onclick="runPipeline()"><span>🚀</span> 启动 AI 流水线</button>
+  </div>
+</div>
+
+<!-- 6-Agent Pipeline -->
+<div class="pipeline">
+  <div class="pipe-node" id="node-designer"><div class="pipe-icon">🎮</div><div class="label">游戏策划</div></div>
+  <div class="pipe-arrow" id="arr-1">→</div>
+  <div class="pipe-node" id="node-narrative"><div class="pipe-icon">📖</div><div class="label">叙事设计</div></div>
+  <div class="pipe-arrow" id="arr-2">→</div>
+  <div class="pipe-node" id="node-codegen"><div class="pipe-icon">💻</div><div class="label">代码生成+验证</div></div>
+  <div class="pipe-arrow" id="arr-3">→</div>
+  <div class="pipe-node" id="node-reviewer"><div class="pipe-icon">🔍</div><div class="label">代码审查</div></div>
+  <div class="pipe-arrow" id="arr-4">→</div>
+  <div class="pipe-node" id="node-test"><div class="pipe-icon">🧪</div><div class="label">自动测试</div></div>
+  <div class="pipe-arrow" id="arr-5">→</div>
+  <div class="pipe-node" id="node-art"><div class="pipe-icon">🎨</div><div class="label">美术出图</div></div>
+</div>
+
+<!-- Save bar -->
+<div id="saveBar" style="display:none;justify-content:center;align-items:center;gap:16px;margin-bottom:24px;padding:16px 24px;background:var(--card);border:1px solid var(--accent);border-radius:var(--radius);box-shadow:0 0 20px var(--accent-glow)">
+  <span style="font-size:15px">流水线已完成，是否保存到历史会话？</span>
+  <button class="btn btn-primary btn-sm" onclick="saveSession()">保存</button>
+  <button class="btn btn-sm" onclick="discardSession()" style="background:var(--surface);color:var(--text-dim);border:1px solid var(--border)">丢弃</button>
+</div>
+
+<div class="results" id="results">
+  <div class="loading-placeholder" style="grid-column:1/-1"><div style="font-size:48px">🎯</div><div>输入需求后点击「启动 AI 流水线」</div></div>
+</div>
+
+<!-- 历史会话 -->
+<div id="sessionsPanel" style="margin-top:40px;display:none">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+    <span style="font-size:18px;font-weight:700">📋 历史会话</span>
+    <span class="card-badge" id="sessionCount">0</span>
+  </div>
+  <div id="sessionsList" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+</div>
+</main>
+
+<script>
+const AGENTS = {
+  designer:{name:'游戏策划',icon:'🎮',id:'designer',order:0},
+  narrative:{name:'叙事设计',icon:'📖',id:'narrative',order:1},
+  codegen:{name:'代码生成+验证',icon:'💻',id:'codegen',order:2},
+  reviewer:{name:'代码审查',icon:'🔍',id:'reviewer',order:3},
+  test:{name:'自动测试',icon:'🧪',id:'test',order:4},
+  art:{name:'美术出图',icon:'🎨',id:'art',order:5},
+};
+const ORDER = ['designer','narrative','codegen','reviewer','test','art'];
+let results = {}, isRunning = false, lastThreadId = '';
+
+function setPrompt(t){document.getElementById('inputReq').value=t}
+
+async function loadSessions(){
+  try{
+    const r=await fetch('/api/v1/sessions'); const data=await r.json();
+    const list=document.getElementById('sessionsList'), panel=document.getElementById('sessionsPanel');
+    if(!data.sessions||data.sessions.length===0)return;
+    panel.style.display='block';document.getElementById('sessionCount').textContent=data.sessions.length;
+    list.innerHTML=data.sessions.slice(0,8).map(s=>{
+      const id=s.thread_id||'', title=esc(s.game_title||'未命名');
+      return `<div class="session-card" data-tid="${id}" data-title="${esc(s.game_title||'')}" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;cursor:pointer;min-width:230px;transition:all 0.2s"
+           onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-weight:700;font-size:14px">${title}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(s.game_genre||'')} | ${s.code_passed?'✅':'⚠️'}代码 | ${s.test_count||'0/0'}</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">🕐${(s.updated_at||'').substring(0,16)}</div>
+        <div style="margin-top:8px"><span class="tag">点击继续</span></div>
+      </div>`}).join('');
+    // 事件委托：点击 session-card
+    list.querySelectorAll('.session-card').forEach(card=>{
+      card.addEventListener('click',function(){
+        const tid=this.dataset.tid, title=this.dataset.title;
+        document.getElementById('inputReq').value='继续修改《'+title+'》的游戏设计';
+        document.getElementById('inputReq').dataset.continueThread=tid;
+        runPipeline();
+      });
+    });
+  }catch(e){}
+}
+
+async function runPipeline(){
+  const ta = document.getElementById('inputReq');
+  const req = ta.value.trim();
+  if(!req||req.length<3){showToast('⚠️ 请输入至少3个字的需求');return}
+  if(isRunning)return; isRunning=true; results={};
+  const continueThread = ta.dataset.continueThread || '';
+  ta.dataset.continueThread = '';
+  const btn=document.getElementById('runBtn'); btn.disabled=true;
+  btn.innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> 运行中...';
+  ORDER.forEach(k=>{let i=document.querySelector(`#node-${k} .pipe-icon`),l=document.querySelector(`#node-${k} .label`);if(i)i.className='pipe-icon';if(l)l.className='label'});
+  document.querySelectorAll('.pipe-arrow').forEach(a=>a.className='pipe-arrow');
+  document.getElementById('results').innerHTML='<div class="loading-placeholder" style="grid-column:1/-1"><div class="spinner"></div><div>AI Agent 流水线启动中...</div></div>';
+  try{
+    const body = {requirement: req};
+    if (continueThread) body.continue_thread = continueThread;
+    const resp=await fetch('/api/v1/generate-stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const reader=resp.body.getReader(),decoder=new TextDecoder();let buf='';
+    while(true){const{done,value}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});
+      const lines=buf.split('\n');buf=lines.pop()||'';
+      for(const l of lines)if(l.startsWith('data: '))try{handleEvent(JSON.parse(l.slice(6)))}catch(e){}}
+  }catch(e){showToast('❌ 连接错误: '+e.message);updateResults()}
+  finally{isRunning=false;btn.disabled=false;btn.innerHTML='<span>🚀</span> 启动 AI 流水线';loadSessions()}
+}
+
+function handleEvent(e){
+  const{type,agent,data}=e, a=AGENTS[agent];
+  if(!a&&type!=='pipeline_done')return;
+  if(type==='agent_start'){setNode(agent,'active')}
+  else if(type==='agent_done'){setNode(agent,'done');results[agent]=data;updateResults()}
+  else if(type==='agent_error'){setNode(agent,'error');results[agent]={error:data.error,summary:'失败'};updateResults()}
+  else if(type==='agent_skip'){setNode(agent,'skip')}
+  else if(type==='pipeline_done'){
+    updateResults();
+    const fs=data.full_state||{};
+    lastThreadId=fs.thread_id||data.thread_id||'';
+    showSaveBar(lastThreadId);
+  }
+}
+
+function showSaveBar(tid){
+  const bar=document.getElementById('saveBar');
+  if(!bar)return;
+  bar.style.display='flex';
+  bar.dataset.tid=tid;
+}
+
+function hideSaveBar(){
+  const bar=document.getElementById('saveBar');
+  if(bar)bar.style.display='none';
+}
+
+async function saveSession(){
+  const bar=document.getElementById('saveBar');
+  const tid=bar.dataset.tid;
+  if(!tid)return;
+  try{
+    const r=await fetch('/api/v1/sessions/'+tid+'/save',{method:'POST'});
+    if(r.ok){showToast('💾 已保存到历史会话');hideSaveBar();loadSessions();}
+    else{const d=await r.json();showToast('⚠️ 保存失败: '+(d.detail||''))}
+  }catch(e){showToast('⚠️ 网络错误')}
+}
+
+async function discardSession(){
+  const bar=document.getElementById('saveBar');
+  const tid=bar.dataset.tid;
+  if(!tid)return;
+  try{
+    await fetch('/api/v1/sessions/'+tid+'/discard',{method:'POST'});
+    hideSaveBar();showToast('🗑️ 已丢弃')
+  }catch(e){}
+}
+
+function setNode(id,state){
+  const i=document.querySelector(`#node-${id} .pipe-icon`),l=document.querySelector(`#node-${id} .label`);
+  if(i){i.className='pipe-icon';if(state==='active')i.classList.add('active');if(state==='done')i.classList.add('done');if(state==='error')i.classList.add('error');if(state==='skip')i.classList.add('skip')}
+  if(l){l.className='label';if(state==='active')l.classList.add('active');if(state==='done')l.classList.add('done')}
+  const idx=ORDER.indexOf(id);
+  if(idx>=0&&state==='done'){const arr=document.getElementById('arr-'+(idx+1));if(arr)arr.classList.add('done')}
+}
+
+function updateResults(){
+  const cards=[];
+  ['designer','narrative','codegen','reviewer','test','art'].forEach(k=>{
+    if(results[k])cards.push(renderCard(k,results[k]));
+    else if(isRunning)cards.push(loadCard(k));
+  });
+  document.getElementById('results').innerHTML=cards.length?cards.join(''):
+    '<div class="loading-placeholder" style="grid-column:1/-1"><div style="font-size:48px">🎯</div><div>等待输入需求</div></div>'
+}
+
+function loadCard(k){const a=AGENTS[k];return `<div class="result-card"><div class="card-header"><span class="card-icon">${a.icon}</span><span class="card-title">${a.name}</span></div><div class="loading-placeholder"><div class="spinner"></div><div>${a.name}工作中...</div></div></div>`}
+
+function renderCard(k,data){
+  const d=data.output||{};
+  switch(k){
+  case'designer':
+    return `<div class="result-card"><div class="card-header"><span class="card-icon">🎮</span><span class="card-title">游戏策划</span><span class="card-badge">Agent 1</span></div><div class="card-content">
+      <p><strong>🎯</strong>《${esc(d.title||'?')}》<strong> 📂</strong>${esc(d.genre||'?')}<strong> 📱</strong>${esc(d.target_platform||'?')}</p>
+      <p><strong>⚙️</strong> ${esc(d.core_mechanic||'?')}</p>
+      <p><strong>🎨</strong> ${esc(d.art_style||'?')}</p>
+      <div class="tags">${(d.key_features||[]).map(f=>`<span class="tag">${esc(f)}</span>`).join('')}</div>
+      <p><strong>💰</strong> ${esc((d.monetization||'').substring(0,150))}</p></div></div>`;
+  case'narrative':
+    const ch=d.characters||[], qs=d.quest_design||[];
+    return `<div class="result-card"><div class="card-header"><span class="card-icon">📖</span><span class="card-title">叙事设计</span><span class="card-badge">Agent 2</span></div><div class="card-content">
+      <p><strong>🌍</strong> ${esc((d.world_setting||'').substring(0,250))}</p>
+      <p><strong>👥 角色(${ch.length})</strong></p>${ch.slice(0,4).map(c=>`<div class="issue-item">👤 <strong>${esc(c.name||'?')}</strong>(${esc(c.role||'?')}) ${esc((c.personality||'').substr(0,60))}</div>`).join('')}
+      <p style="margin-top:8px"><strong>📋 任务(${qs.length})</strong></p>${qs.slice(0,3).map(q=>`<div class="issue-item">📌 <strong>${esc(q.name||'?')}</strong>[${esc(q.type||'?')}] ${esc(q.objective||'?')}</div>`).join('')}
+    </div></div>`;
+  case'codegen':
+    const files=d.files||[], f0=files[0], code=f0?f0.content||'':'', lines=code.split('\n');
+    const runOk=d.run_passed, fixed=d.auto_fixed; return `<div class="result-card"><div class="card-header"><span class="card-icon">💻</span><span class="card-title">代码生成+验证</span><span class="card-badge">Agent 3</span></div><div class="card-content">
+      <p><strong>${esc(d.language||'python')}</strong> | ${files.length}文件 | ${esc(d.entry_point||'')}</p>
+      ${d.architecture_notes?`<p><strong>架构:</strong> ${esc((d.architecture_notes).substring(0,200))}</p>`:''}
+      <div class="run-info ${runOk?'pass':'fail'}">${runOk?'✅ 运行通过':'⚠️ 运行失败'}${fixed?` (自动修复${d.fix_attempts||0}次)`:' (首次生成即通过)'}${d.run_output?`<br><small>${esc(d.run_output.substring(0,300))}</small>`:''}</div>
+      ${f0?`<p>📄 <strong>${esc(f0.path||'main.py')}</strong> (${code.length}字符) ${f0.validation?.valid?'✅ 语法通过':'⚠️ 语法问题'}</p>`:''}
+      ${code?`<div class="code-block"><pre>${lines.slice(0,30).map((l,i)=>`<span class="ln">${String(i+1).padStart(3)}</span>${esc(l)}`).join('\n')}${lines.length>30?`\n<span style="color:var(--text-dim)">...共${lines.length}行</span>`:''}</pre></div>`:''}
+    </div></div>`;
+  case'reviewer':
+    const s=d.score||0, bugs=d.bugs||[], opts=d.optimizations||[], sec=d.security_issues||[];
+    return `<div class="result-card"><div class="card-header"><span class="card-icon">🔍</span><span class="card-title">代码审查</span><span class="card-badge">Agent 4</span></div><div class="card-content">
+      <div class="review-stats"><div class="stat"><span class="num ${s>=70?'g':s>=40?'o':'r'}">${s}</span><span class="lbl">评分</span></div><div class="stat"><span class="num ${bugs.length?'r':'g'}">${bugs.length}</span><span class="lbl">🐛Bug</span></div><div class="stat"><span class="num o">${opts.length}</span><span class="lbl">⚡优化</span></div><div class="stat"><span class="num ${sec.length?'o':'g'}">${sec.length}</span><span class="lbl">🔒安全</span></div></div>
+      ${d.passed?'<span style="color:var(--green)">✅ 审查通过</span>':'<span style="color:var(--orange)">⚠️ 需改进</span>'}
+      ${bugs.length?`<p style="margin-top:8px"><strong>🐛 问题:</strong></p>${bugs.slice(0,4).map(b=>`<div class="issue-item" style="border-left-color:${b.severity==='critical'?'var(--red)':'var(--orange)'}"><strong>${esc(b.file||'?')}:${b.line||'?'}</strong> ${esc((b.description||'').substr(0,100))}</div>`).join('')}`:''}
+      ${opts.length?`<p style="margin-top:6px"><strong>⚡ 优化:</strong></p>${opts.slice(0,2).map(o=>`<div class="issue-item" style="border-left-color:var(--accent)">[${esc(o.category||'?')}] ${esc((o.description||'').substr(0,100))}</div>`).join('')}`:''}
+    </div></div>`;
+  case'test':
+    const t=data.output||{}, testOk=t.passed;
+    if(t.skipped)return `<div class="result-card"><div class="card-header"><span class="card-icon">🧪</span><span class="card-title">自动测试</span><span class="card-badge">Agent 5</span></div><div class="card-content"><p>⚠️ 跳过: ${esc(t.reason||'无代码')}</p></div></div>`;
+    return `<div class="result-card"><div class="card-header"><span class="card-icon">🧪</span><span class="card-title">自动测试</span><span class="card-badge">Agent 5</span></div><div class="card-content">
+      <div class="run-info ${testOk?'pass':'fail'}">${testOk?'✅ 测试全部通过':'⚠️ 测试失败'} ${esc(t.summary||'')}${t.auto_fixed?' (自动修复)':''}</div>
+      <div class="review-stats"><div class="stat"><span class="num ${testOk?'g':'r'}">${t.passed_count||0}</span><span class="lbl">通过</span></div><div class="stat"><span class="num ${(t.failed_count||0)>0?'r':'g'}">${t.failed_count||0}</span><span class="lbl">失败</span></div></div>
+      ${t.output?`<div class="code-block" style="max-height:200px"><pre>${esc(t.output.substring(0,1000))}</pre></div>`:''}
+    </div></div>`;
+  case'art':
+    const pal=d.color_palette||[], images=data.generated_images||[];
+    return `<div class="result-card"><div class="card-header"><span class="card-icon">🎨</span><span class="card-title">美术出图</span><span class="card-badge">Agent 6</span></div><div class="card-content">
+      <p><strong>🎨</strong> ${esc((d.concept_desc||'').substring(0,200))}</p>
+      ${pal.length?`<div class="palette">${pal.map(c=>`<div class="swatch" style="background:${esc(c)}"><span class="hex">${esc(c)}</span></div>`).join('')}</div><div style="height:20px"></div>`:''}
+      ${images.length?`<p><strong>🖼️ Qwen-Image-2.0 实际生成 (${images.length}张)</strong></p><div class="img-grid">${images.map(img=>`<div class="img-card"><img src="${esc(img.url)}" alt="${esc(img.name||'')}" loading="lazy"><div class="img-label">${esc(img.name||'')} <span class="img-type">[${esc(img.type||'')}]</span></div></div>`).join('')}</div>`:''}
+      <p style="margin-top:8px"><strong>🖌️ 2D Prompt:</strong></p><div class="code-block" style="max-height:100px"><pre>${esc((d.prompt_2d||'').substring(0,300))}</pre></div>
+    </div></div>`;
+  default:return'';
+  }
+}
+
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function showToast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),3500)}
+updateResults();
+loadSessions();
+</script>
+</body>
+</html>
