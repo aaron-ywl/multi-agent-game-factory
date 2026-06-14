@@ -1,5 +1,5 @@
 """
-SSE 流式流水线 — 6 Agent 实时事件推送
+SSE 流式流水线 — 6 Agent 实时事件推送，支持 CodeGen↔Reviewer 循环回退
 """
 import json
 import uuid
@@ -12,6 +12,7 @@ from src.agents.code_generator import code_generator_agent
 from src.agents.code_reviewer import code_reviewer_agent
 from src.agents.test_agent import test_agent
 from src.agents.art_director import art_director_agent
+from src.config.settings import settings
 
 logger = structlog.get_logger()
 
@@ -63,40 +64,77 @@ async def run_streaming_pipeline(user_request: str, continue_thread: str = None)
         state.setdefault("errors", []).append(f"叙事失败: {e}")
         yield _event("agent_error", "narrative", {"error": str(e)[:200]})
 
-    # ===== Agent 3: CodeGen (生成+验证+修复) =====
-    yield _event("agent_start", "codegen", {"name": "代码生成+验证", "desc": "生成代码→编译运行→自动修复..."})
-    try:
-        r = await code_generator_agent(state); state.update(r)
-        c = state.get("code_result", {})
-        run_ok = c.get("run_passed", False)
-        fixed = c.get("auto_fixed", False)
-        yield _event("agent_done", "codegen", {
-            "summary": f"代码{'✅ 运行通过' if run_ok else '⚠️ 运行失败'}{' (自动修复' + str(c.get('fix_attempts',0)) + '次)' if fixed else ''}",
-            "output": c,
-        })
-    except Exception as e:
-        state.setdefault("errors", []).append(f"代码生成失败: {e}")
-        yield _event("agent_error", "codegen", {"error": str(e)[:200]})
+    # ===== Agent 3 & 4: CodeGen ↔ Reviewer 循环（支持回退修复） =====
+    MAX_LOOP = settings.MAX_LOOPBACKS
+    loopback_count = 0
 
-    # ===== Agent 4: Reviewer =====
-    if state.get("code_result", {}).get("files"):
+    while True:
+        # ----- CodeGen -----
+        if loopback_count > 0:
+            yield _event("agent_reset", "codegen", {"name": "代码生成+验证", "loopback": loopback_count})
+            yield _event("agent_reset", "reviewer", {"name": "代码审查", "loopback": loopback_count})
+        yield _event("agent_start", "codegen", {
+            "name": "代码生成+验证",
+            "desc": "生成代码→编译运行→自动修复..." if loopback_count == 0 else f"定向修复(第{loopback_count}轮)→编译运行..."
+        })
+        try:
+            r = await code_generator_agent(state); state.update(r)
+            c = state.get("code_result", {})
+            run_ok = c.get("run_passed", False)
+            fixed = c.get("auto_fixed", False)
+            yield _event("agent_done", "codegen", {
+                "summary": f"代码{'✅ 运行通过' if run_ok else '⚠️ 运行失败'}{' (自动修复' + str(c.get('fix_attempts',0)) + '次)' if fixed else ''}",
+                "output": c,
+            })
+        except Exception as e:
+            state.setdefault("errors", []).append(f"代码生成失败: {e}")
+            yield _event("agent_error", "codegen", {"error": str(e)[:200]})
+            break  # 代码生成崩溃，退出循环
+
+        # ----- Reviewer -----
+        if not state.get("code_result", {}).get("files"):
+            yield _event("agent_skip", "reviewer", {"reason": "无代码"})
+            break
+
         yield _event("agent_start", "reviewer", {"name": "代码审查", "desc": "审查代码质量..."})
         try:
             r = await code_reviewer_agent(state); state.update(r)
             rev = state.get("code_review", {})
+            score = rev.get("score", 0)
+            needs_regen = state.get("needs_regeneration", False)
             yield _event("agent_done", "reviewer", {
-                "summary": f"评分{rev.get('score',0)}/100 {'✅' if rev.get('passed') else '⚠️'} {len(rev.get('bugs',[]))}个问题",
+                "summary": f"评分{score}/100 {'✅' if rev.get('passed') else '⚠️'} {len(rev.get('bugs',[]))}个问题",
                 "output": rev,
             })
         except Exception as e:
             state.setdefault("errors", []).append(f"审查失败: {e}")
             yield _event("agent_error", "reviewer", {"error": str(e)[:200]})
-    else:
-        yield _event("agent_skip", "reviewer", {"reason": "无代码"})
+            break
 
-    # ===== Agent 5: Test (pytest生成+执行) =====
+        # 判断是否回退
+        needs_regen = state.get("needs_regeneration", False)
+        if needs_regen and loopback_count < MAX_LOOP:
+            loopback_count += 1
+            state["loopback_count"] = loopback_count
+            yield _event("agent_loopback", "system", {
+                "from": "reviewer", "to": "codegen",
+                "reason": f"评分{state.get('code_review',{}).get('score','?')}/100 < 70，第{loopback_count}次定向修复",
+                "count": loopback_count, "max": MAX_LOOP,
+            })
+            # 不清除 review_feedback，CodeGen 进去检测到就会走修复模式
+            continue
+        else:
+            if needs_regen and loopback_count >= MAX_LOOP:
+                yield _event("agent_loopback", "system", {
+                    "from": "reviewer", "to": "test",
+                    "reason": f"已达最大循环次数({MAX_LOOP})，强制进入测试",
+                    "count": loopback_count, "max": MAX_LOOP, "forced": True,
+                })
+            break
+
+    # ===== Agent 5: Test =====
     if state.get("code_result", {}).get("files"):
-        yield _event("agent_start", "test", {"name": "自动化测试", "desc": "生成pytest→执行→修复..."})
+        yield _event("agent_start", "test", {"name": "自动化测试", "desc": "生成pytest→执行..."})
         try:
             r = await test_agent(state); state.update(r)
             t = state.get("test_result", {})
@@ -113,24 +151,48 @@ async def run_streaming_pipeline(user_request: str, continue_thread: str = None)
     else:
         yield _event("agent_skip", "test", {"reason": "无代码"})
 
-    # ===== Agent 6: Art (Prompt + 真正出图) =====
-    yield _event("agent_start", "art", {"name": "美术总监+出图", "desc": "Prompt生成→Qwen-Image-2.0实际出图..."})
-    try:
-        r = await art_director_agent(state); state.update(r)
-        art = state.get("art_directive", {})
-        images = state.get("generated_images", [])
-        yield _event("agent_done", "art", {
-            "summary": f"色板{len(art.get('color_palette',[]))}色 🖼️实际生成{len(images)}张图",
-            "output": art,
-            "generated_images": images,
-        })
-    except Exception as e:
-        state.setdefault("errors", []).append(f"美术失败: {e}")
-        yield _event("agent_error", "art", {"error": str(e)[:200]})
+    # ===== Agent 6: Art (前置通过才出图；循环耗尽时 Reviewer 允许强制通过) =====
+    design = state.get("game_design") or {}
+    narrative = state.get("narrative") or {}
+    code_result = state.get("code_result") or {}
+    code_review = state.get("code_review") or {}
+    test_result = state.get("test_result") or {}
+    loopback_exhausted = state.get("loopback_count", 0) >= MAX_LOOP
+
+    prereq_ok = True
+    skip_reasons = []
+    if not design.get("title"):
+        prereq_ok = False; skip_reasons.append("策划未产出")
+    if not narrative.get("characters"):
+        prereq_ok = False; skip_reasons.append("叙事未产出")
+    if not code_result.get("run_passed"):
+        prereq_ok = False; skip_reasons.append("代码未通过运行")
+    if not loopback_exhausted and not code_review.get("passed"):
+        prereq_ok = False; skip_reasons.append(f"审查未通过(score={code_review.get('score','?')})")
+    if not test_result.get("passed") and not test_result.get("skipped"):
+        prereq_ok = False; skip_reasons.append("测试未通过")
+
+    if prereq_ok:
+        yield _event("agent_start", "art", {"name": "美术总监+出图", "desc": "Prompt生成→Qwen-Image-2.0实际出图..."})
+        try:
+            r = await art_director_agent(state); state.update(r)
+            art = state.get("art_directive", {})
+            images = state.get("generated_images", [])
+            yield _event("agent_done", "art", {
+                "summary": f"色板{len(art.get('color_palette',[]))}色 🖼️实际生成{len(images)}张图",
+                "output": art,
+                "generated_images": images,
+            })
+        except Exception as e:
+            state.setdefault("errors", []).append(f"美术失败: {e}")
+            yield _event("agent_error", "art", {"error": str(e)[:200]})
+    else:
+        reason_str = "、".join(skip_reasons)
+        yield _event("agent_skip", "art", {"reason": f"前置条件未满足: {reason_str}"})
 
     # 完成
     yield _event("pipeline_done", "system", {
-        "summary": f"6 Agent流水线完成 · {len(state.get('errors',[]))}错误 · 产物: outputs/",
+        "summary": f"6 Agent流水线完成 · {len(state.get('errors',[]))}错误 · 循环修复{loopback_count}轮 · 产物: outputs/",
         "full_state": {
             "game_design": state.get("game_design"),
             "narrative": state.get("narrative"),

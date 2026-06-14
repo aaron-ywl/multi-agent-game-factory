@@ -28,6 +28,7 @@ class GameDevState(BaseModel):
     # Agent 4: Code Reviewer → 代码审查
     code_review: Optional[dict] = None
     needs_regeneration: bool = False
+    review_feedback: Optional[dict] = None  # 审查反馈，供 CodeGen 定向修复用（bugs + optimizations + security）
 
     # Agent 5: Test Agent → 自动测试生成+执行
     test_result: Optional[dict] = None

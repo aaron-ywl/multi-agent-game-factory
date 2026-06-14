@@ -87,20 +87,35 @@ async def code_reviewer_agent(state: dict) -> dict:
         return {"errors": [f"Code Reviewer 失败: {str(e)}"]}
 
     score = result.get("score", 60)
-    passed = score >= 70
-    needs_regeneration = score < 40  # 低于40分触发重生成
+    bugs = result.get("bugs", [])
+    optimizations = result.get("optimizations", [])
+    security_issues = result.get("security_issues", [])
+
+    # 双重门禁：分数 ≥ 70 且 无 critical/major bug 才算通过
+    has_blocking_bugs = any(
+        b.get("severity", "") in ("critical", "major") for b in bugs
+    )
+    needs_regeneration = score < 70 or has_blocking_bugs
 
     return {
         "code_review": {
             "score": score,
-            "passed": passed,
-            "bugs": result.get("bugs", []),
-            "optimizations": result.get("optimizations", []),
-            "security_issues": result.get("security_issues", []),
+            "passed": not needs_regeneration,
+            "bugs": bugs,
+            "optimizations": optimizations,
+            "security_issues": security_issues,
         },
         "needs_regeneration": needs_regeneration,
+        # 定向修复上下文：CodeGen 拿到后只修具体 bug，不全量重写
+        "review_feedback": {
+            "bugs": bugs,
+            "optimizations": optimizations,
+            "security_issues": security_issues,
+            "summary": result.get("summary", ""),
+        } if needs_regeneration else None,
         "messages": [{
             "role": "ai", "name": "code_reviewer",
-            "content": f"代码审查完成: 评分 {score}/100, {'通过' if passed else '需改进'}"
+            "content": f"代码审查完成: 评分 {score}/100, {'✅ 通过' if not needs_regeneration else '⚠️ 需改进'}" +
+                       (f" → 定向修复 {len(bugs)} 个问题" if needs_regeneration else "")
         }],
     }

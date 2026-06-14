@@ -1,0 +1,387 @@
+================================================================
+  Multi-Agent Game Factory — 运行指南
+  基于 LangGraph 的 6 Agent 游戏原型自动化生产系统
+================================================================
+
+目录
+  1. 环境准备
+  2. 配置 API
+  3. 初始化知识库
+  4. 运行方式一：命令行 Demo
+  5. 运行方式二：Web 界面
+  6. API 调用
+  7. 产物说明
+  8. 常见问题
+  9. 项目结构速查
+
+
+================================================================
+一、环境准备
+================================================================
+
+1.1 检查 Python 版本
+
+  python3 --version
+  → 需要 Python 3.10 或以上
+
+
+1.2 安装依赖
+
+  cd /Users/aaron/project/game-ai-agent
+  pip install -r requirements.txt
+
+  依赖清单：
+  - openai          LLM 调用（兼容接口）
+  - langgraph       Agent 流程编排
+  - pymilvus        向量数据库
+  - milvus-lite     嵌入式 Milvus（无需单独部署）
+  - fastapi + uvicorn  Web 服务
+  - PyPDF2 / pdfplumber  PDF 解析
+  - pytest          测试框架
+  - structlog       结构化日志
+  - httpx           异步 HTTP 客户端
+
+
+================================================================
+二、配置 API
+================================================================
+
+2.1 创建 .env 文件
+
+  cp .env.example .env
+
+2.2 编辑 .env，填入你的 API Key
+
+  OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
+  OPENAI_BASE_URL=https://api.openai.com/v1
+  OPENAI_MODEL=DeepSeek-V3.2
+  EMBEDDING_MODEL=text-embedding-v1
+
+  说明：
+  - OPENAI_BASE_URL 支持任意 OpenAI 兼容接口，包括：
+    DeepSeek、Qwen（阿里百炼）、GLM（智谱）、GPT-4 等
+  - OPENAI_MODEL 按你的 API 提供商填写：
+    DeepSeek:  DeepSeek-V3.2
+    OpenAI:    gpt-4o
+    Qwen:      qwen-plus
+    GLM:       glm-4-flash
+  - EMBEDDING_MODEL 用于文本向量化（1536 维），
+    需与 Base URL 配套
+
+
+================================================================
+三、初始化知识库
+================================================================
+
+3.1 检查知识库 PDF
+
+  ls data/knowledge_pdfs/
+  → 应该看到 5 个 PDF：
+    01_游戏设计核心模式与循环.pdf
+    02_战斗系统与数值平衡.pdf
+    03_游戏代码架构与设计模式.pdf
+    04_AIGC美术资产生成指南.pdf
+    05_商业化与关卡节奏设计.pdf
+
+  如果缺失，先生成：
+    PYTHONPATH=. python3 scripts/generate_knowledge_pdfs.py
+
+3.2 将 PDF 索引到 Milvus 向量库
+
+  PYTHONPATH=. python3 scripts/index_knowledge.py
+
+  输出示例：
+    📚 PDF 目录: /Users/aaron/project/game-ai-agent/data/knowledge_pdfs
+    📦 Milvus DB: milvus_data/game_kb.db
+    🔪 Chunk: 500字 + 125字 overlap
+    ✅ 索引完成! 42 个切块 (overlap sliding window)
+    📊 文档总数: 42
+
+  这一步只需要执行一次，数据会持久化在 milvus_data/ 目录。
+
+
+================================================================
+四、运行方式一：命令行 Demo
+================================================================
+
+4.1 完整流水线（最常用）
+
+  PYTHONPATH=. python3 demo.py run "做一个二次元卡牌RPG，抽卡+元素克制回合制"
+
+  这会依次执行 6 个 Agent：
+    ① 游戏策划   → 分析需求，输出策划文档
+    ② 叙事设计   → 生成世界观 + 角色 + 技能
+    ③ 代码生成   → 生成 main.py，编译运行，失败自动修复
+    ④ 代码审查   → 审查评分，低于70分回退修复
+    ⑤ 自动化测试 → 生成 pytest 用例并执行
+    ⑥ 美术出图   → 调用 AI 生成角色立绘和场景图
+
+  控制台会实时打印每个 Agent 的输出结果。
+
+
+4.2 单独使用某个工具
+
+  # 数值平衡计算
+  python3 demo.py tool balance --attack 50 --health 500
+
+  # 代码语法校验
+  python3 demo.py tool validate --code "def test(): pass"
+
+  # 美术 Prompt 增强
+  python3 demo.py tool enhance --prompt "a warrior character" --style stylized
+
+  # 资源清单生成
+  python3 demo.py tool checklist --genre RPG
+
+  # 查看已注册的技能
+  python3 demo.py tool skills
+
+
+================================================================
+五、运行方式二：Web 界面
+================================================================
+
+5.1 启动 Web 服务
+
+  cd /Users/aaron/project/game-ai-agent
+  PYTHONPATH=. python3 -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+
+  启动成功后会看到：
+    INFO     game_ai_agent_started
+
+5.2 打开浏览器
+
+  访问 http://localhost:8000
+
+  界面是深色主题的单页应用，分三个区域：
+  ┌──────────────────────────────────────────────┐
+  │  顶部输入栏：输入游戏需求，点击"开始生成"      │
+  ├──────────────────────────────────────────────┤
+  │  左侧面板：6 个 Agent 状态灯，实时显示进度     │
+  │  - 运行中 → 蓝色旋转                          │
+  │  - 完成   → 绿色 ❤️                           │
+  │  - 失败   → 红色 ❤️💔                           │
+  ├──────────────────────────────────────────────┤
+  │  右侧面板：当前选中 Agent 的产出详情           │
+  │  - Designer → 策划文档                        │
+  │  - CodeGen  → 代码预览                        │
+  │  - Test     → pytest 报告                     │
+  │  - Art      → 生成的图片缩略图                 │
+  ├──────────────────────────────────────────────┤
+  │  底部操作栏：流水线完成后出现                   │
+  │  [保存会话] [丢弃]                             │
+  │  保存后会话进入历史列表，下次可以继续开发        │
+  └──────────────────────────────────────────────┘
+
+5.3 SSE 实时推送
+
+  Web 界面通过 SSE（Server-Sent Events）实时接收事件，
+  每完成一个 Agent 就会推送一条 JSON 事件：
+
+    {"type":"agent_done","agent":"designer","data":{...}}
+    {"type":"agent_done","agent":"narrative","data":{...}}
+    {"type":"agent_done","agent":"codegen","data":{...}}
+    {"type":"agent_done","agent":"reviewer","data":{...}}
+    {"type":"agent_done","agent":"test","data":{...}}
+    {"type":"agent_done","agent":"art","data":{...}}
+    {"type":"pipeline_done","agent":"system","data":{...}}
+
+
+================================================================
+六、API 调用
+================================================================
+
+6.1 一次性调用（非流式）
+
+  POST http://localhost:8000/api/v1/generate
+
+  curl 示例：
+    curl -X POST http://localhost:8000/api/v1/generate \
+      -H "Content-Type: application/json" \
+      -d '{"requirement":"做一个回合制对战游戏"}'
+
+  请求体：
+    {
+      "requirement": "游戏需求描述（最少3字）",
+      "continue_thread": null   // 可选，传入 thread_id 继续之前的会话
+    }
+
+  返回所有 6 个 Agent 的完整产出。
+
+
+6.2 SSE 流式调用
+
+  POST http://localhost:8000/api/v1/generate-stream
+
+  在浏览器中监听 EventSource：
+    const es = new EventSource("/api/v1/generate-stream", {
+      method: "POST",
+      body: JSON.stringify({requirement: "..."})
+    });
+    es.onmessage = (e) => {
+      const {type, agent, data} = JSON.parse(e.data);
+      // type: agent_start | agent_done | agent_error | agent_skip | pipeline_done
+    };
+
+
+6.3 会话管理
+
+  列出最近会话：
+    GET http://localhost:8000/api/v1/sessions?limit=15
+
+  查看某个会话：
+    GET http://localhost:8000/api/v1/sessions/{thread_id}
+
+  保存会话：
+    POST http://localhost:8000/api/v1/sessions/{thread_id}/save
+
+  丢弃会话：
+    POST http://localhost:8000/api/v1/sessions/{thread_id}/discard
+
+
+6.4 知识库管理
+
+  查看统计：
+    GET http://localhost:8000/api/v1/vector/stats
+
+  重建索引：
+    POST http://localhost:8000/api/v1/vector/reindex
+
+  索引全部 PDF：
+    POST http://localhost:8000/api/v1/vector/index-pdfs
+
+
+6.5 工具调用
+
+  POST /api/v1/tools/balance        → 战斗数值平衡计算
+  POST /api/v1/tools/validate-code  → 代码语法校验
+  POST /api/v1/tools/enhance-prompt → 美术 Prompt 增强
+  POST /api/v1/tools/asset-checklist → 资源清单生成
+
+
+================================================================
+七、产物说明
+================================================================
+
+流水线完成后，产物保存在以下位置：
+
+7.1 outputs/main.py
+
+  LLM 生成的可运行游戏代码。根据输入的游戏类型不同，
+  会生成两种模板之一：
+  - 塔防模式：Plant/Zombie 类，网格战场，阳光经济，ASCII 显示
+  - 对战模式：Fighter/Card 类，技能系统，HP 条，自动回合
+
+7.2 outputs/test_main.py
+
+  自动生成的 pytest 单元测试文件。测试每个类的实例化能力，
+  可以直接在此基础上扩展业务测试。
+
+7.3 outputs/images/
+
+  AI 生成的游戏美术资产（Qwen-Image-2.0 输出）：
+  - 角色立绘 ×2（前两个角色）
+  - 场景概念图 ×1
+
+7.4 data/sessions.db
+
+  SQLite 数据库，持久化存储：
+  - 每次会话的完整状态（策划、代码、测试结果等）
+  - 知识回流记录（通过验证的代码自动入向量库）
+  - 支持"继续之前的会话"功能
+
+
+================================================================
+八、常见问题
+================================================================
+
+Q1: 知识库怎么重建？
+    删除 milvus_data/ 目录，重新运行 index_knowledge.py
+
+Q2: 生成的图片在哪？
+    Qwen-Image 返回的是远程 URL，有效期内可直接访问。
+    产物信息记录在 state.generated_images 中。
+
+Q3: 流水线报错怎么办？
+    检查 state.errors 字段，每个 Agent 的错误都会记录。
+    单个 Agent 失败不会阻塞整个流水线。
+
+Q4: 怎么"继续"上一次的开发？
+    Web 界面保存会话后，下次请求时传入 thread_id。
+    CLI 方式暂不支持继续（需要修改 demo.py）。
+
+Q5: loopback 最多几次？
+    MAX_LOOPBACKS=3，即 CodeGen ↔ Reviewer 之间
+    最多循环修复 3 次。
+
+Q6: 怎么换 LLM 模型？
+    修改 .env 中的 OPENAI_MODEL 即可，支持任意
+    OpenAI 兼容接口的模型。
+
+Q7: 知识库用什么 Embedding 模型？
+    默认 text-embedding-v1（1536 维）。
+    改用其他模型需同步修改 EMBEDDING_DIM。
+
+
+================================================================
+九、项目结构速查
+================================================================
+
+  game-ai-agent/
+  │
+  ├── src/                      # 源代码
+  │   ├── agents/               # 6 个 Agent 实现
+  │   │   ├── game_designer.py      # ① 游戏策划
+  │   │   ├── narrative_agent.py    # ② 叙事设计
+  │   │   ├── code_generator.py     # ③ 代码生成+验证+修复
+  │   │   ├── code_reviewer.py      # ④ 代码审查（<70分回退）
+  │   │   ├── test_agent.py         # ⑤ 自动化测试
+  │   │   └── art_director.py       # ⑥ 美术出图
+  │   │
+  │   ├── graph/                # LangGraph 流水线
+  │   │   ├── state.py              # 共享状态定义
+  │   │   ├── game_pipeline.py      # 批量流水线
+  │   │   └── stream_pipeline.py    # SSE 流式流水线
+  │   │
+  │   ├── services/             # 核心服务
+  │   │   ├── llm_client.py         # LLM 客户端
+  │   │   ├── vector_rag_service.py # Milvus+BM25+Rerank
+  │   │   ├── image_gen.py          # Qwen-Image 出图
+  │   │   └── memory.py             # SQLite 三层记忆
+  │   │
+  │   ├── api/                  # FastAPI 接口
+  │   │   ├── app.py                # 应用入口
+  │   │   └── routes.py             # 路由定义
+  │   │
+  │   ├── skills/               # 工具层
+  │   │   ├── registry.py           # Skill 注册
+  │   │   ├── game_tools.py         # 数值/校验/Prompt
+  │   │   └── setup.py              # 注册入口
+  │   │
+  │   └── config/
+  │       └── settings.py           # 配置（.env 驱动）
+  │
+  ├── static/
+  │   └── index.html            # Web UI（深色主题）
+  │
+  ├── data/
+  │   ├── knowledge_pdfs/       # 5 份游戏开发知识 PDF
+  │   └── sessions.db           # 会话持久化
+  │
+  ├── milvus_data/              # Milvus Lite 向量库
+  │
+  ├── outputs/                  # 产物目录
+  │   ├── main.py               # 生成的游戏代码
+  │   ├── test_main.py          # 生成的测试用例
+  │   └── images/               # AI 生成的美术图
+  │
+  ├── scripts/
+  │   ├── index_knowledge.py    # 知识库索引
+  │   └── generate_knowledge_pdfs.py  # PDF 生成
+  │
+  ├── demo.py                   # CLI 入口
+  ├── requirements.txt          # 依赖
+  ├── .env.example              # 配置模板
+  └── README.md                 # 项目说明
+
+================================================================

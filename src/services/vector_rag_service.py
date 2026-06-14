@@ -302,6 +302,13 @@ class MilvusRAGService:
 
     def _init(self):
         Path(MILVUS_DB).parent.mkdir(parents=True, exist_ok=True)
+        # 清理可能残留的文件锁（上一个进程异常退出时可能遗留）
+        lock_path = Path(MILVUS_DB) / "LOCK"
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
         self._client = MilvusClient(MILVUS_DB)
         self._bm25 = BM25Index(k1=BM25_k1, b=BM25_b)
         self._all_docs: list[dict] = []  # 保存所有文档用于 BM25 + rerank
@@ -319,11 +326,14 @@ class MilvusRAGService:
             self._client.load_collection(COLLECTION_NAME)
             logger.info("milvus_created", name=COLLECTION_NAME, dim=DIM)
 
-        # 索引
+        # 索引（milvus-lite 持久化后索引已存在，建前先查，避免重复创建报错）
         try:
-            idx = IndexParams()
-            idx.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="COSINE", params={"nlist": 128})
-            self._client.create_index(collection_name=COLLECTION_NAME, index_params=idx)
+            # list_indexes 返回已有索引名列表，index 已存在就跳过
+            existing_indexes = self._client.list_indexes(collection_name=COLLECTION_NAME)
+            if not existing_indexes:
+                idx = IndexParams()
+                idx.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="COSINE", params={"nlist": 128})
+                self._client.create_index(collection_name=COLLECTION_NAME, index_params=idx)
         except Exception:
             pass
 

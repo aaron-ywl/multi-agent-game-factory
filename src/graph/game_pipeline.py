@@ -58,6 +58,35 @@ def should_regenerate(state: GameDevState) -> Literal["codegen", "test"]:
     return "test"
 
 
+def should_run_art(state: GameDevState) -> Literal["art_director", "__end__"]:
+    """美术生成前置条件：Designer/Narrative/CodeGen/Test 必须成功；Reviewer 允许循环耗尽后强制通过"""
+    design = state.game_design or {}
+    narrative = state.narrative or {}
+    code_result = state.code_result or {}
+    code_review = state.code_review or {}
+    test_result = state.test_result or {}
+    loopback_exhausted = state.loopback_count >= settings.MAX_LOOPBACKS
+
+    failed = []
+    if not design.get("title"):
+        failed.append("策划未产出有效设计")
+    if not narrative.get("characters"):
+        failed.append("叙事未产出角色")
+    if not code_result.get("run_passed"):
+        failed.append("代码未通过运行验证")
+    # Reviewer：循环耗尽时允许通过（已有警告标记），否则必须 passed
+    if not loopback_exhausted and not code_review.get("passed"):
+        failed.append(f"代码审查未通过(score={code_review.get('score','?')})")
+    if not test_result.get("passed") and not test_result.get("skipped"):
+        failed.append("自动化测试未通过")
+
+    if failed:
+        logger.info("art_prerequisite_skip", reasons=failed)
+        return END
+    logger.info("art_prerequisite_pass")
+    return "art_director"
+
+
 def build_pipeline() -> StateGraph:
     workflow = StateGraph(GameDevState)
 
@@ -76,7 +105,11 @@ def build_pipeline() -> StateGraph:
     workflow.add_edge("codegen", "reviewer")
     workflow.add_conditional_edges("reviewer", should_regenerate,
                                     {"codegen": "codegen", "test": "test"})
-    workflow.add_edge("test", "art_director")
+    # Test 之后加条件分支：全部前置通过才进 Art，否则直接结束
+    workflow.add_conditional_edges("test", should_run_art, {
+        "art_director": "art_director",
+        END: END,
+    })
     workflow.add_edge("art_director", END)
 
     return workflow

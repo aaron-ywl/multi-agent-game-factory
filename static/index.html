@@ -220,11 +220,24 @@ async function runPipeline(){
 
 function handleEvent(e){
   const{type,agent,data}=e, a=AGENTS[agent];
-  if(!a&&type!=='pipeline_done')return;
-  if(type==='agent_start'){setNode(agent,'active')}
+  if(!a&&type!=='pipeline_done'&&type!=='agent_loopback')return;
+  if(type==='agent_start'){setNode(agent,'active');if(results[agent]){delete results[agent];updateResults()}}
   else if(type==='agent_done'){setNode(agent,'done');results[agent]=data;updateResults()}
   else if(type==='agent_error'){setNode(agent,'error');results[agent]={error:data.error,summary:'失败'};updateResults()}
   else if(type==='agent_skip'){setNode(agent,'skip')}
+  else if(type==='agent_reset'){setNode(agent,'active');delete results[agent];updateResults()}
+  else if(type==='agent_loopback'){
+    if(data.forced){
+      // 循环耗尽强制退出：保留最后一次审查结果，不重置卡片
+      showToast(`⚠️ ${data.reason||'循环耗尽，强制进入测试'} (${data.count||'?'}/${data.max||'?'})`);
+    } else {
+      // 正常回退：重置两张卡片为 loading，等待下一轮修复
+      setNode('codegen','active');delete results['codegen'];
+      setNode('reviewer','active');delete results['reviewer'];
+      updateResults();
+      showToast(`🔄 ${data.reason||'回退修复'} (${data.count||'?'}/${data.max||'?'})`);
+    }
+  }
   else if(type==='pipeline_done'){
     updateResults();
     const fs=data.full_state||{};
